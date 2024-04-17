@@ -1,13 +1,13 @@
-From 2aa4fc9f260089511d4ca7ff1d7ae474bda762f3 Mon Sep 17 00:00:00 2001
+From 0f330b8056fc63a0fc3a2c3212bacb98a571553e Mon Sep 17 00:00:00 2001
 From: thinkiny <thinkiny@126.com>
 Date: Wed, 24 Jan 2024 19:45:55 -0800
 Subject: [PATCH] Enable frame parameter alpha_background for MacOS
 
 ---
- src/macfont.m | 10 ++++++++--
- src/nsfns.m   | 42 +++++++++++++++++++++++++++++++++--------
- src/nsterm.m  | 52 +++++++++++++++++++++++++++++++--------------------
- 3 files changed, 74 insertions(+), 30 deletions(-)
+ src/macfont.m |  10 ++++-
+ src/nsfns.m   |  57 +++++++++++++++++++++----
+ src/nsterm.m  | 115 +++++++++++++++++++++++++++++++++++++++++---------
+ 3 files changed, 151 insertions(+), 31 deletions(-)
 
 diff --git a/src/macfont.m b/src/macfont.m
 index e3b3d40df43..a2044f23b9d 100644
@@ -39,7 +39,7 @@ index e3b3d40df43..a2044f23b9d 100644
          {
            if (face && (NS_FACE_BACKGROUND (face)
 diff --git a/src/nsfns.m b/src/nsfns.m
-index c521140bd68..3d1ac5c01eb 100644
+index c521140bd68..f96d6a395b1 100644
 --- a/src/nsfns.m
 +++ b/src/nsfns.m
 @@ -301,7 +301,7 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
@@ -51,7 +51,7 @@ index c521140bd68..3d1ac5c01eb 100644
  
    block_input ();
    if (ns_lisp_to_color (arg, &col))
-@@ -316,11 +316,10 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
+@@ -316,24 +316,27 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
    f->output_data.ns->background_color = col;
  
    FRAME_BACKGROUND_PIXEL (f) = [col unsignedLong];
@@ -64,7 +64,16 @@ index c521140bd68..3d1ac5c01eb 100644
  
        if (alpha != (EmacsCGFloat) 1.0)
            [[view window] setOpaque: NO];
-@@ -330,10 +329,7 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
+       else
+           [[view window] setOpaque: YES];
+ 
++
++      NSVisualEffectView *effectView = view.window.contentView.subviews.firstObject;
++      if (effectView.subviews.count == 2) {
++	      NSBox *titleView = effectView.subviews.lastObject;
++	      titleView.fillColor = [col colorWithAlphaComponent: alpha];
++      }
++
        face = FRAME_DEFAULT_FACE (f);
        if (face)
          {
@@ -76,7 +85,7 @@ index c521140bd68..3d1ac5c01eb 100644
            update_face_from_frame_parameter (f, Qbackground_color, arg);
          }
  
-@@ -346,6 +342,36 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
+@@ -346,6 +349,44 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
    unblock_input ();
  }
  
@@ -107,13 +116,21 @@ index c521140bd68..3d1ac5c01eb 100644
 +  f->alpha_background = alpha;
 +  [[view window] setBackgroundColor: [f->output_data.ns->background_color
 +					 colorWithAlphaComponent: alpha]];
++
++  NSVisualEffectView *effectView = view.window.contentView.subviews.firstObject;
++  if (effectView.subviews.count == 2) {
++	  NSBox *titleView = effectView.subviews.lastObject;
++	  titleView.fillColor = [f->output_data.ns->background_color
++				    colorWithAlphaComponent: alpha];
++  }
++  
 +  recompute_basic_faces (f);
 +  SET_FRAME_GARBAGED (f);
 +}
  
  static void
  ns_set_cursor_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
-@@ -1107,7 +1133,7 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
+@@ -1107,7 +1148,7 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
    ns_set_z_group,
    0, /* x_set_override_redirect */
    gui_set_no_special_glyphs,
@@ -123,7 +140,7 @@ index c521140bd68..3d1ac5c01eb 100644
  #ifdef NS_IMPL_COCOA
    ns_set_appearance,
 diff --git a/src/nsterm.m b/src/nsterm.m
-index faf9324402b..afb990f3fb9 100644
+index faf9324402b..f7faead79db 100644
 --- a/src/nsterm.m
 +++ b/src/nsterm.m
 @@ -2627,8 +2627,9 @@ Hide the window (X11 semantics)
@@ -265,7 +282,78 @@ index faf9324402b..afb990f3fb9 100644
          [w setOpaque: NO];
  
        f->border_width = [w borderWidth];
-@@ -9169,9 +9180,10 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
+@@ -9104,6 +9115,7 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
+ 		 | NSWindowStyleMaskClosable);
+ 
+   last_drag_event = nil;
++  styleMask |= NSWindowStyleMaskFullSizeContentView;
+ 
+   width = FRAME_TEXT_COLS_TO_PIXEL_WIDTH (f, f->text_cols);
+   height = FRAME_TEXT_LINES_TO_PIXEL_HEIGHT (f, f->text_lines);
+@@ -9121,7 +9133,61 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
+       EmacsView *view = FRAME_NS_VIEW (f);
+ 
+       [self setDelegate:view];
+-      [[self contentView] addSubview:view];
++      /* View Hierarchy:
++         NSWindow
++         - NSVisualEffectView, extended under title bar
++           - titleBackgroundView, view under title bar to match emacs background
++           - boundingView, emacs looks at EmavsView's superview for frame size
++             - EmacsView, actual emacs content
++       */
++
++      NSVisualEffectView *blurView = [NSVisualEffectView alloc];
++      [blurView initWithFrame:
++          NSMakeRect (0, 0, FRAME_TEXT_COLS_TO_PIXEL_WIDTH (f, f->text_cols),
++                      FRAME_TEXT_LINES_TO_PIXEL_HEIGHT (f, f->text_lines))];
++      [blurView setAutoresizingMask: NSViewWidthSizable | NSViewHeightSizable];
++      blurView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
++      blurView.material = NSVisualEffectMaterialHUDWindow;
++      blurView.emphasized = YES;
++      blurView.state = NSVisualEffectStateActive;
++
++      [[self contentView] addSubview:blurView];
++
++
++      NSView *boundingView = [[NSView alloc] initWithFrame:NSMakeRect (0, 0, 0, 0)];
++      [boundingView setAutoresizingMask: NSViewWidthSizable | NSViewHeightSizable];
++      [blurView addSubview:boundingView];
++      NSBox *titleBackgroundView;
++
++      NSLayoutGuide *layout = self.contentLayoutGuide;
++
++      boundingView.translatesAutoresizingMaskIntoConstraints = NO;
++      [boundingView.bottomAnchor constraintEqualToAnchor:layout.bottomAnchor].active = YES;
++      [boundingView.leftAnchor constraintEqualToAnchor:layout.leftAnchor].active = YES;
++      [boundingView.rightAnchor constraintEqualToAnchor:layout.rightAnchor].active = YES;
++
++      if (FRAME_UNDECORATED_ROUND (f))
++        [boundingView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor].active = YES;
++      else
++        {
++          /* constraint emacs content under titlebar */
++          [boundingView.topAnchor constraintEqualToAnchor:layout.topAnchor].active = YES;
++
++          /* add separate view for titlebar background */
++          titleBackgroundView = [[NSBox alloc] initWithFrame:NSMakeRect (0, 0, 0, 0)];
++          [titleBackgroundView setAutoresizingMask: NSViewWidthSizable | NSViewHeightSizable];
++          [blurView addSubview:titleBackgroundView];
++          titleBackgroundView.boxType = NSBoxCustom;
++          titleBackgroundView.borderWidth = 0;
++          titleBackgroundView.transparent = NO;
++          titleBackgroundView.translatesAutoresizingMaskIntoConstraints = NO;
++          [titleBackgroundView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor].active = YES;
++          [titleBackgroundView.bottomAnchor constraintEqualToAnchor:layout.topAnchor].active = YES;
++          [titleBackgroundView.leftAnchor constraintEqualToAnchor:layout.leftAnchor].active = YES;
++          [titleBackgroundView.rightAnchor constraintEqualToAnchor:layout.rightAnchor].active = YES;
++        }
++
++      [boundingView addSubview:view];
+       [self makeFirstResponder:view];
+ 
+ #if !defined (NS_IMPL_COCOA) || MAC_OS_X_VERSION_MIN_REQUIRED <= 1090
+@@ -9169,11 +9235,18 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
        f->border_width = [self borderWidth];
  
        col = [NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND
@@ -278,7 +366,15 @@ index faf9324402b..afb990f3fb9 100644
 +      if (f->alpha_background != (EmacsCGFloat) 1.0)
          [self setOpaque:NO];
  
++      if (!FRAME_UNDECORATED_ROUND (f))
++      {
++	      titleBackgroundView.fillColor =
++		      [col colorWithAlphaComponent:f->alpha_background];
++      }
++
        /* toolbar support */
+       [self createToolbar:f];
+ 
 -- 
 2.39.3 (Apple Git-145)
 
