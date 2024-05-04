@@ -1,13 +1,13 @@
-From 0f330b8056fc63a0fc3a2c3212bacb98a571553e Mon Sep 17 00:00:00 2001
+From fbb8aa2c0db8ee1ec6ff1315a758185e790f65bd Mon Sep 17 00:00:00 2001
 From: thinkiny <thinkiny@126.com>
-Date: Wed, 24 Jan 2024 19:45:55 -0800
-Subject: [PATCH] Enable frame parameter alpha_background for MacOS
+Date: Sat, 4 May 2024 23:44:25 +0800
+Subject: [PATCH] feat: enable alpha-background and blur on macOS
 
 ---
  src/macfont.m |  10 ++++-
  src/nsfns.m   |  57 +++++++++++++++++++++----
- src/nsterm.m  | 115 +++++++++++++++++++++++++++++++++++++++++---------
- 3 files changed, 151 insertions(+), 31 deletions(-)
+ src/nsterm.m  | 114 ++++++++++++++++++++++++++++++++++++++++----------
+ 3 files changed, 150 insertions(+), 31 deletions(-)
 
 diff --git a/src/macfont.m b/src/macfont.m
 index e3b3d40df43..a2044f23b9d 100644
@@ -39,7 +39,7 @@ index e3b3d40df43..a2044f23b9d 100644
          {
            if (face && (NS_FACE_BACKGROUND (face)
 diff --git a/src/nsfns.m b/src/nsfns.m
-index c521140bd68..f96d6a395b1 100644
+index c521140bd68..11575192e73 100644
 --- a/src/nsfns.m
 +++ b/src/nsfns.m
 @@ -301,7 +301,7 @@ Turn the input menu (an NSMenu) into a lisp list for tracking on lisp side.
@@ -123,7 +123,7 @@ index c521140bd68..f96d6a395b1 100644
 +	  titleView.fillColor = [f->output_data.ns->background_color
 +				    colorWithAlphaComponent: alpha];
 +  }
-+  
++
 +  recompute_basic_faces (f);
 +  SET_FRAME_GARBAGED (f);
 +}
@@ -140,7 +140,7 @@ index c521140bd68..f96d6a395b1 100644
  #ifdef NS_IMPL_COCOA
    ns_set_appearance,
 diff --git a/src/nsterm.m b/src/nsterm.m
-index faf9324402b..f7faead79db 100644
+index f26cdb17903..4c00ba072e3 100644
 --- a/src/nsterm.m
 +++ b/src/nsterm.m
 @@ -2627,8 +2627,9 @@ Hide the window (X11 semantics)
@@ -203,7 +203,7 @@ index faf9324402b..f7faead79db 100644
        [bmp fill];
  
        [bmp release];
-@@ -3729,7 +3731,8 @@ Function modeled after x_draw_glyph_string_box ().
+@@ -3797,7 +3799,8 @@ Function modeled after x_draw_glyph_string_box ().
    if (s->face->box == FACE_SIMPLE_BOX && s->face->box_color)
      {
        ns_draw_box (r, abs (hthickness), abs (vthickness),
@@ -213,19 +213,17 @@ index faf9324402b..f7faead79db 100644
                     left_p, right_p);
      }
    else
-@@ -3767,8 +3770,10 @@ Function modeled after x_draw_glyph_string_box ().
-             {
-               if (s->hl != DRAW_CURSOR)
-                 [(NS_FACE_BACKGROUND (face) != 0
--                  ? [NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)]
-+		  ? [[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)]
+@@ -3842,7 +3845,8 @@ Function modeled after x_draw_glyph_string_box ().
+ 	{
+ 	  if (s->hl != DRAW_CURSOR)
+ 	    [(NS_FACE_BACKGROUND (face) != 0
+-	      ? [NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)]
++	      ? [[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)]
 +		      colorWithAlphaComponent: s->f->alpha_background]
-                   : FRAME_BACKGROUND_COLOR (s->f)) set];
-+
-               else if (face && (NS_FACE_BACKGROUND (face)
-                                 == [(NSColor *) FRAME_CURSOR_COLOR (s->f)
-                                                 unsignedLong]))
-@@ -3912,7 +3917,8 @@ Function modeled after x_draw_glyph_string_box ().
+ 	      : FRAME_BACKGROUND_COLOR (s->f)) set];
+ 	  else if (face && (NS_FACE_BACKGROUND (face)
+ 			    == [(NSColor *) FRAME_CURSOR_COLOR (s->f)
+@@ -3981,7 +3985,8 @@ Function modeled after x_draw_glyph_string_box ().
       otherwise, since we composite the image under NS (instead of mucking
       with its background color), we must clear just the image area.  */
  
@@ -235,7 +233,7 @@ index faf9324402b..f7faead79db 100644
  
    if (bg_height > s->slice.height || s->img->hmargin || s->img->vmargin
        || s->img->mask || s->img->pixmap == 0 || s->width != s->background_width)
-@@ -3982,7 +3988,8 @@ Function modeled after x_draw_glyph_string_box ().
+@@ -4051,7 +4056,8 @@ Function modeled after x_draw_glyph_string_box ().
    if (s->hl == DRAW_CURSOR)
      {
        [FRAME_CURSOR_COLOR (s->f) set];
@@ -245,7 +243,7 @@ index faf9324402b..f7faead79db 100644
      }
    else
      tdCol = [NSColor colorWithUnsignedLong: NS_FACE_FOREGROUND (face)];
-@@ -4076,10 +4083,12 @@ Function modeled after x_draw_glyph_string_box ().
+@@ -4144,10 +4150,12 @@ Function modeled after x_draw_glyph_string_box ().
  		face = FACE_FROM_ID (s->f, MOUSE_FACE_ID);
  	      prepare_face_for_display (s->f, face);
  
@@ -260,9 +258,9 @@ index faf9324402b..f7faead79db 100644
  	  NSRectFill (NSMakeRect (x, y, w, h));
  	}
      }
-@@ -4105,7 +4114,8 @@ Function modeled after x_draw_glyph_string_box ().
- 	  if (s->hl == DRAW_CURSOR)
- 	    [FRAME_CURSOR_COLOR (s->f) set];
+@@ -4178,7 +4186,8 @@ Function modeled after x_draw_glyph_string_box ().
+ 	  else if (s->stippled_p)
+ 	    [[dpyinfo->bitmaps[s->face->stipple - 1].img stippleMask] set];
  	  else
 -	    [[NSColor colorWithUnsignedLong: s->face->background] set];
 +	    [[[NSColor colorWithUnsignedLong: s->face->background]
@@ -270,7 +268,7 @@ index faf9324402b..f7faead79db 100644
  
  	  NSRectFill (NSMakeRect (x, s->y, background_width, s->height));
  	}
-@@ -8431,8 +8441,9 @@ - (void)toggleFullScreen: (id)sender
+@@ -8546,8 +8555,9 @@ - (void)toggleFullScreen: (id)sender
          }
  
        [w setContentView:[fw contentView]];
@@ -282,7 +280,7 @@ index faf9324402b..f7faead79db 100644
          [w setOpaque: NO];
  
        f->border_width = [w borderWidth];
-@@ -9104,6 +9115,7 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
+@@ -9219,6 +9229,7 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
  		 | NSWindowStyleMaskClosable);
  
    last_drag_event = nil;
@@ -290,7 +288,7 @@ index faf9324402b..f7faead79db 100644
  
    width = FRAME_TEXT_COLS_TO_PIXEL_WIDTH (f, f->text_cols);
    height = FRAME_TEXT_LINES_TO_PIXEL_HEIGHT (f, f->text_lines);
-@@ -9121,7 +9133,61 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
+@@ -9236,7 +9247,61 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
        EmacsView *view = FRAME_NS_VIEW (f);
  
        [self setDelegate:view];
@@ -353,7 +351,7 @@ index faf9324402b..f7faead79db 100644
        [self makeFirstResponder:view];
  
  #if !defined (NS_IMPL_COCOA) || MAC_OS_X_VERSION_MIN_REQUIRED <= 1090
-@@ -9169,11 +9235,18 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
+@@ -9284,11 +9349,18 @@ - (instancetype) initWithEmacsFrame: (struct frame *) f
        f->border_width = [self borderWidth];
  
        col = [NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND
