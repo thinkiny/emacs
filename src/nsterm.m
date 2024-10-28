@@ -1811,6 +1811,44 @@ ns_set_undecorated (struct frame *f, Lisp_Object new_value, Lisp_Object old_valu
 }
 
 void
+ns_set_undecorated_round (struct frame *f, Lisp_Object new_value, Lisp_Object old_value)
+/* --------------------------------------------------------------------------
+     Set frame F's `undecorated_round' parameter.  If non-nil, F's window-system
+     window is drawn without decorations, title, minimize/maximize boxes
+     and external borders.  This usually means that the window cannot be
+     dragged, resized, iconified, maximized or deleted with the mouse.  If
+     nil, draw the frame with all the elements listed above unless these
+     have been suspended via window manager settings.
+   -------------------------------------------------------------------------- */
+{
+  NSTRACE ("ns_set_undecorated_round");
+
+  if (!EQ (new_value, old_value))
+    {
+      EmacsView *view = (EmacsView *)FRAME_NS_VIEW (f);
+      NSWindow *oldWindow = [view window];
+      NSWindow *newWindow;
+
+      block_input ();
+
+      FRAME_UNDECORATED_ROUND (f) = !NILP (new_value);
+
+      newWindow = [[EmacsWindow alloc] initWithEmacsFrame:f];
+
+      if ([oldWindow isKeyWindow])
+        [newWindow makeKeyAndOrderFront:NSApp];
+
+      [newWindow setIsVisible:[oldWindow isVisible]];
+      if ([oldWindow isMiniaturized])
+        [newWindow miniaturize:NSApp];
+
+      [oldWindow close];
+
+      unblock_input ();
+    }
+}
+
+void
 ns_set_parent_frame (struct frame *f, Lisp_Object new_value, Lisp_Object old_value)
 /* --------------------------------------------------------------------------
      Set frame F's `parent-frame' parameter.  If non-nil, make F a child
@@ -1944,11 +1982,25 @@ ns_set_appearance (struct frame *f, Lisp_Object new_value, Lisp_Object old_value
     return;
 
   if (EQ (new_value, Qdark))
-    FRAME_NS_APPEARANCE (f) = ns_appearance_vibrant_dark;
-  else if (EQ (new_value, Qlight))
-    FRAME_NS_APPEARANCE (f) = ns_appearance_aqua;
+    {
+#if MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
+#ifndef NSAppKitVersionNumber10_14
+#define NSAppKitVersionNumber10_14 1671
+#endif
+      if (NSAppKitVersionNumber >= NSAppKitVersionNumber10_14)
+        FRAME_NS_APPEARANCE(f) = ns_appearance_dark_aqua;
+      else
+#endif /* MAC_OS_X_VERSION_MAX_ALLOWED >= 101400 */
+        FRAME_NS_APPEARANCE(f) = ns_appearance_vibrant_dark;
+    }
+  else if (EQ(new_value, Qlight))
+    {
+      FRAME_NS_APPEARANCE (f) = ns_appearance_aqua;
+    }
   else
-    FRAME_NS_APPEARANCE (f) = ns_appearance_system_default;
+    {
+      FRAME_NS_APPEARANCE (f) = ns_appearance_system_default;
+    }
 
   [window setAppearance];
 #endif /* MAC_OS_X_VERSION_MAX_ALLOWED >= 101000 */
@@ -2627,8 +2679,10 @@ ns_clear_frame (struct frame *f)
 
   block_input ();
   ns_focus (f, &r, 1);
-  [[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND
-			    (FACE_FROM_ID (f, DEFAULT_FACE_ID))] set];
+  [[[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND
+             (FACE_FROM_ID (f, DEFAULT_FACE_ID))]
+     colorWithAlphaComponent: f->alpha_background] set];
+
   NSRectFill (r);
   ns_unfocus (f);
 
@@ -2656,7 +2710,7 @@ ns_clear_frame_area (struct frame *f, int x, int y, int width, int height)
 
   r = NSIntersectionRect (r, [view frame]);
   ns_focus (f, &r, 1);
-  [[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)] set];
+  [[[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)] colorWithAlphaComponent: f->alpha_background] set];
 
   NSRectFill (r);
 
@@ -2760,7 +2814,7 @@ ns_clear_under_internal_border (struct frame *f)
         return;
 
       ns_focus (f, NULL, 1);
-      [[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)] set];
+      [[[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)] colorWithAlphaComponent: f->alpha_background] set];
       NSRectFill (NSMakeRect (0, margin, width, border));
       NSRectFill (NSMakeRect (0, 0, border, height));
       NSRectFill (NSMakeRect (0, margin, width, border));
@@ -2812,7 +2866,8 @@ ns_after_update_window_line (struct window *w, struct glyph_row *desired_row)
           NSRect r = NSMakeRect (0, y, FRAME_PIXEL_WIDTH (f), height);
           ns_focus (f, &r, 1);
 
-          [[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)] set];
+          [[[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)]
+             colorWithAlphaComponent: f->alpha_background] set];
           NSRectFill (NSMakeRect (0, y, width, height));
           NSRectFill (NSMakeRect (FRAME_PIXEL_WIDTH (f) - width,
                                   y, width, height));
@@ -2977,7 +3032,8 @@ ns_draw_fringe_bitmap (struct window *w, struct glyph_row *row,
     {
       NSTRACE_RECT ("clearRect", clearRect);
 
-      [[NSColor colorWithUnsignedLong:face->background] set];
+      [[[NSColor colorWithUnsignedLong:face->background]
+         colorWithAlphaComponent: f->alpha_background] set];
       NSRectFill (clearRect);
     }
 
@@ -3008,7 +3064,7 @@ ns_draw_fringe_bitmap (struct window *w, struct glyph_row *row,
       else
         bm_color = f->output_data.ns->cursor_color;
 
-      [bm_color set];
+      [[bm_color colorWithAlphaComponent:f->alpha_background] set];
       [bmp fill];
 
       [bmp release];
@@ -3793,7 +3849,8 @@ ns_dumpglyphs_box_or_relief (struct glyph_string *s)
   if (s->face->box == FACE_SIMPLE_BOX && s->face->box_color)
     {
       ns_draw_box (r, abs (hthickness), abs (vthickness),
-                   [NSColor colorWithUnsignedLong:face->box_color],
+                   [[NSColor colorWithUnsignedLong:face->box_color]
+                     colorWithAlphaComponent: s->f->alpha_background],
                    left_p, right_p);
     }
   else
@@ -3838,7 +3895,8 @@ ns_maybe_dumpglyphs_background (struct glyph_string *s, char force_p)
 	{
 	  if (s->hl != DRAW_CURSOR)
 	    [(NS_FACE_BACKGROUND (face) != 0
-	      ? [NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)]
+	      ? [[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)]
+		      colorWithAlphaComponent: s->f->alpha_background]
 	      : FRAME_BACKGROUND_COLOR (s->f)) set];
 	  else if (face && (NS_FACE_BACKGROUND (face)
 			    == [(NSColor *) FRAME_CURSOR_COLOR (s->f)
@@ -3977,7 +4035,8 @@ ns_dumpglyphs_image (struct glyph_string *s, NSRect r)
      otherwise, since we composite the image under NS (instead of mucking
      with its background color), we must clear just the image area.  */
 
-  [[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)] set];
+  [[[NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)]
+     colorWithAlphaComponent: s->f->alpha_background] set];
 
   if (bg_height > s->slice.height || s->img->hmargin || s->img->vmargin
       || s->img->mask || s->img->pixmap == 0 || s->width != s->background_width)
@@ -4047,7 +4106,8 @@ ns_dumpglyphs_image (struct glyph_string *s, NSRect r)
   if (s->hl == DRAW_CURSOR)
     {
       [FRAME_CURSOR_COLOR (s->f) set];
-      tdCol = [NSColor colorWithUnsignedLong: NS_FACE_BACKGROUND (face)];
+      tdCol = [[NSColor colorWithUnsignedLong: NS_FACE_BACKGROUND (face)]
+                colorWithAlphaComponent: s->f->alpha_background];
     }
   else
     tdCol = [NSColor colorWithUnsignedLong: NS_FACE_FOREGROUND (face)];
@@ -4140,10 +4200,12 @@ ns_draw_stretch_glyph_string (struct glyph_string *s)
 		face = FACE_FROM_ID (s->f, MOUSE_FACE_ID);
 	      prepare_face_for_display (s->f, face);
 
-	      [[NSColor colorWithUnsignedLong: face->background] set];
+	      [[[NSColor colorWithUnsignedLong: face->background]
+		 colorWithAlphaComponent: s->f->alpha_background] set];
 	    }
 	  else
-	    [[NSColor colorWithUnsignedLong: s->face->background] set];
+	    [[[NSColor colorWithUnsignedLong: s->face->background]
+	       colorWithAlphaComponent: s->f->alpha_background] set];
 	  NSRectFill (NSMakeRect (x, y, w, h));
 	}
     }
@@ -4174,7 +4236,8 @@ ns_draw_stretch_glyph_string (struct glyph_string *s)
 	  else if (s->stippled_p)
 	    [[dpyinfo->bitmaps[s->face->stipple - 1].img stippleMask] set];
 	  else
-	    [[NSColor colorWithUnsignedLong: s->face->background] set];
+	    [[[NSColor colorWithUnsignedLong: s->face->background]
+	       colorWithAlphaComponent: s->f->alpha_background] set];
 
 	  NSRectFill (NSMakeRect (x, s->y, background_width, s->height));
 	}
@@ -4861,7 +4924,7 @@ ns_select_1 (int nfds, fd_set *readfds, fd_set *writefds,
       hold_event_q.nr = 0;
     }
 
-  eassert (nfds <= FD_SETSIZE);
+  eassert (nfds <= EMACS_MAX_FD);
   for (k = 0; k < nfds; k++)
     {
       if (readfds && FD_ISSET(k, readfds)) ++nr;
@@ -5892,6 +5955,7 @@ ns_term_shutdown (int sig)
 
    ========================================================================== */
 
+static const void *kEmacsAppKVOContext = &kEmacsAppKVOContext;
 
 @implementation EmacsApp
 
@@ -6179,20 +6243,32 @@ ns_term_shutdown (int sig)
 	 object:nil];
 #endif
 
+#if defined (NS_IMPL_COCOA) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
+  [self addObserver:self
+         forKeyPath:NSStringFromSelector(@selector(effectiveAppearance))
+            options:NSKeyValueObservingOptionInitial|NSKeyValueObservingOptionNew
+            context:&kEmacsAppKVOContext];
+
+   pending_funcalls = Fcons(list3(Qrun_hook_with_args,
+                                  Qns_system_appearance_change_functions,
+                                  Vns_system_appearance),
+                            pending_funcalls);
+#endif
+
 #ifdef NS_IMPL_COCOA
   /* Some functions/methods in CoreFoundation/Foundation increase the
      maximum number of open files for the process in their first call.
      We make dummy calls to them and then reduce the resource limit
      here, since pselect cannot handle file descriptors that are
-     greater than or equal to FD_SETSIZE.  */
+     greater than or equal to EMACS_MAX_FD.  */
   CFSocketGetTypeID ();
   CFFileDescriptorGetTypeID ();
   [[NSFileHandle alloc] init];
   struct rlimit rlim;
   if (getrlimit (RLIMIT_NOFILE, &rlim) == 0
-      && rlim.rlim_cur > FD_SETSIZE)
+      && rlim.rlim_cur > EMACS_MAX_FD)
     {
-      rlim.rlim_cur = FD_SETSIZE;
+      rlim.rlim_cur = EMACS_MAX_FD;
       setrlimit (RLIMIT_NOFILE, &rlim);
     }
   if ([NSApp activationPolicy] == NSApplicationActivationPolicyProhibited) {
@@ -6217,6 +6293,68 @@ ns_term_shutdown (int sig)
 #endif
 }
 
+- (void)observeValueForKeyPath:(NSString *)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary *)change
+                       context:(void *)context
+{
+#if defined (NS_IMPL_COCOA) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
+  if (context == kEmacsAppKVOContext
+      && object == self
+      && [keyPath isEqualToString:
+                    NSStringFromSelector (@selector(effectiveAppearance))])
+    [self systemAppearanceDidChange:
+               [change objectForKey:NSKeyValueChangeNewKey]];
+  else
+#endif /* (NS_IMPL_COCOA) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400 */
+    [super observeValueForKeyPath:keyPath
+                         ofObject:object
+                           change:change
+                          context:context];
+}
+
+#if defined (NS_IMPL_COCOA) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
+#ifndef NSAppKitVersionNumber10_14
+#define NSAppKitVersionNumber10_14 1671
+#endif
+- (void)systemAppearanceDidChange:(NSAppearance *)newAppearance
+{
+
+  if (NSAppKitVersionNumber < NSAppKitVersionNumber10_14)
+    return;
+
+  NSAppearanceName appearance_name =
+      [newAppearance bestMatchFromAppearancesWithNames:@[
+        NSAppearanceNameAqua, NSAppearanceNameDarkAqua
+      ]];
+
+  BOOL is_dark_appearance =
+    [appearance_name isEqualToString:NSAppearanceNameDarkAqua];
+  Vns_system_appearance = is_dark_appearance ? Qdark : Qlight;
+
+  run_system_appearance_change_hook ();
+}
+
+static inline void run_system_appearance_change_hook (void)
+{
+  if (NILP (Vns_system_appearance_change_functions))
+    return;
+
+  block_input ();
+
+  bool owfi = waiting_for_input;
+  waiting_for_input = false;
+
+  safe_calln (Qrun_hook_with_args,
+          Qns_system_appearance_change_functions,
+          Vns_system_appearance);
+  Fredisplay(Qt);
+
+  waiting_for_input = owfi;
+
+  unblock_input ();
+}
+#endif /* (NS_IMPL_COCOA) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400 */
 
 /* Termination sequences:
     C-x C-c:
@@ -6389,6 +6527,14 @@ not_in_argv (NSString *arg)
   ns_send_appdefined (-1);
 }
 
+- (void)applicationWillTerminate:(NSNotification *)notification
+{
+  NSTRACE ("[EmacsApp applicationWillTerminate:]");
+
+  [self removeObserver:self
+            forKeyPath:NSStringFromSelector(@selector(effectiveAppearance))
+               context:&kEmacsAppKVOContext];
+}
 
 
 /* ==========================================================================
@@ -8603,8 +8749,9 @@ ns_in_echo_area (void)
         }
 
       [w setContentView:[fw contentView]];
-      [w setBackgroundColor: col];
-      if ([col alphaComponent] != (EmacsCGFloat) 1.0)
+      [w setBackgroundColor: [col colorWithAlphaComponent:
+                                    f->alpha_background]];
+      if (f->alpha_background != (EmacsCGFloat) 1.0)
         [w setOpaque: NO];
 
       f->border_width = [w borderWidth];
@@ -9275,6 +9422,8 @@ ns_in_echo_area (void)
 		 | NSWindowStyleMaskMiniaturizable
 		 | NSWindowStyleMaskClosable);
 
+  styleMask |= NSWindowStyleMaskFullSizeContentView;
+
   last_drag_event = nil;
 
   width = FRAME_TEXT_COLS_TO_PIXEL_WIDTH (f, f->text_cols);
@@ -9293,7 +9442,61 @@ ns_in_echo_area (void)
       EmacsView *view = FRAME_NS_VIEW (f);
 
       [self setDelegate:view];
-      [[self contentView] addSubview:view];
+      /* View Hierarchy:
+         NSWindow
+         - NSVisualEffectView, extended under title bar
+           - titleBackgroundView, view under title bar to match emacs background
+           - boundingView, emacs looks at EmavsView's superview for frame size
+             - EmacsView, actual emacs content
+       */
+
+      NSVisualEffectView *blurView = [NSVisualEffectView alloc];
+      [blurView initWithFrame:
+          NSMakeRect (0, 0, FRAME_TEXT_COLS_TO_PIXEL_WIDTH (f, f->text_cols),
+                      FRAME_TEXT_LINES_TO_PIXEL_HEIGHT (f, f->text_lines))];
+      [blurView setAutoresizingMask: NSViewWidthSizable | NSViewHeightSizable];
+      blurView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+      blurView.material = NSVisualEffectMaterialHUDWindow;
+      blurView.emphasized = YES;
+      blurView.state = NSVisualEffectStateActive;
+
+      [[self contentView] addSubview:blurView];
+
+
+      NSView *boundingView = [[NSView alloc] initWithFrame:NSMakeRect (0, 0, 0, 0)];
+      [boundingView setAutoresizingMask: NSViewWidthSizable | NSViewHeightSizable];
+      [blurView addSubview:boundingView];
+      NSBox *titleBackgroundView;
+
+      NSLayoutGuide *layout = self.contentLayoutGuide;
+
+      boundingView.translatesAutoresizingMaskIntoConstraints = NO;
+      [boundingView.bottomAnchor constraintEqualToAnchor:layout.bottomAnchor].active = YES;
+      [boundingView.leftAnchor constraintEqualToAnchor:layout.leftAnchor].active = YES;
+      [boundingView.rightAnchor constraintEqualToAnchor:layout.rightAnchor].active = YES;
+
+      if (FRAME_UNDECORATED_ROUND (f))
+        [boundingView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor].active = YES;
+      else
+        {
+          /* constraint emacs content under titlebar */
+          [boundingView.topAnchor constraintEqualToAnchor:layout.topAnchor].active = YES;
+
+          /* add separate view for titlebar background */
+          titleBackgroundView = [[NSBox alloc] initWithFrame:NSMakeRect (0, 0, 0, 0)];
+          [titleBackgroundView setAutoresizingMask: NSViewWidthSizable | NSViewHeightSizable];
+          [blurView addSubview:titleBackgroundView];
+          titleBackgroundView.boxType = NSBoxCustom;
+          titleBackgroundView.borderWidth = 0;
+          titleBackgroundView.transparent = NO;
+          titleBackgroundView.translatesAutoresizingMaskIntoConstraints = NO;
+          [titleBackgroundView.topAnchor constraintEqualToAnchor:self.contentView.topAnchor].active = YES;
+          [titleBackgroundView.bottomAnchor constraintEqualToAnchor:layout.topAnchor].active = YES;
+          [titleBackgroundView.leftAnchor constraintEqualToAnchor:layout.leftAnchor].active = YES;
+          [titleBackgroundView.rightAnchor constraintEqualToAnchor:layout.rightAnchor].active = YES;
+        }
+
+      [boundingView addSubview:view];
       [self makeFirstResponder:view];
 
 #if !defined (NS_IMPL_COCOA) || MAC_OS_X_VERSION_MIN_REQUIRED <= 1090
@@ -9341,10 +9544,17 @@ ns_in_echo_area (void)
       f->border_width = [self borderWidth];
 
       col = [NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND
-                                     (FACE_FROM_ID (f, DEFAULT_FACE_ID))];
-      [self setBackgroundColor:col];
-      if ([col alphaComponent] != (EmacsCGFloat) 1.0)
+                     (FACE_FROM_ID (f, DEFAULT_FACE_ID))];
+      [self setBackgroundColor:
+              [col colorWithAlphaComponent:f->alpha_background]];
+      if (f->alpha_background != (EmacsCGFloat) 1.0)
         [self setOpaque:NO];
+
+      if (!FRAME_UNDECORATED_ROUND (f))
+        {
+          titleBackgroundView.fillColor =
+              [col colorWithAlphaComponent:f->alpha_background];
+        }
 
       /* toolbar support */
       [self createToolbar:f];
@@ -9358,13 +9568,22 @@ ns_in_echo_area (void)
 #endif
     }
 
+  if (FRAME_UNDECORATED_ROUND (f))
+    {
+      [self setTitlebarAppearsTransparent:YES];
+      [self setTitleVisibility:NSWindowTitleHidden];
+      [[self standardWindowButton:NSWindowCloseButton] setHidden:YES];
+      [[self standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
+      [[self standardWindowButton:NSWindowZoomButton] setHidden:YES];
+    }
+
   return self;
 }
 
 
 - (void)createToolbar: (struct frame *)f
 {
-  if (FRAME_UNDECORATED (f) || !FRAME_EXTERNAL_TOOL_BAR (f) || [self toolbar] != nil)
+  if (FRAME_UNDECORATED (f) || FRAME_UNDECORATED_ROUND (f) || !FRAME_EXTERNAL_TOOL_BAR (f) || [self toolbar] != nil)
     return;
 
   EmacsView *view = (EmacsView *)FRAME_NS_VIEW (f);
@@ -9640,7 +9859,7 @@ nswindow_orderedIndex_sort (id w1, id w2, void *c)
   NSTRACE ("[EmacsWindow accessibilityAttributeValue:]");
 
   if ([attribute isEqualToString:NSAccessibilityRoleAttribute])
-    return NSAccessibilityTextFieldRole;
+    return NSAccessibilityWindowRole;
 
   if ([attribute isEqualToString:NSAccessibilitySelectedTextAttribute]
       && curbuf && ! NILP (BVAR (curbuf, mark_active)))
@@ -9876,17 +10095,26 @@ nswindow_orderedIndex_sort (id w1, id w2, void *c)
 #define NSAppKitVersionNumber10_10 1343
 #endif
 
-  if (NSAppKitVersionNumber < NSAppKitVersionNumber10_10)
-    return;
+   if (NSAppKitVersionNumber < NSAppKitVersionNumber10_10)
+     return;
 
-  if (FRAME_NS_APPEARANCE (f) == ns_appearance_vibrant_dark)
-    appearance =
-      [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
-  else if (FRAME_NS_APPEARANCE (f) == ns_appearance_aqua)
-    appearance =
-      [NSAppearance appearanceNamed:NSAppearanceNameAqua];
+#if MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
+#ifndef NSAppKitVersionNumber10_14
+#define NSAppKitVersionNumber10_14 1671
+#endif
+   if (NSAppKitVersionNumber >= NSAppKitVersionNumber10_14
+       && FRAME_NS_APPEARANCE(f) == ns_appearance_dark_aqua)
+     appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+   else
+#endif /* MAC_OS_X_VERSION_MAX_ALLOWED >= 101400 */
+     if (FRAME_NS_APPEARANCE(f) == ns_appearance_vibrant_dark)
+       appearance =
+         [NSAppearance appearanceNamed:NSAppearanceNameVibrantDark];
+     else if (FRAME_NS_APPEARANCE (f) == ns_appearance_aqua)
+       appearance =
+         [NSAppearance appearanceNamed:NSAppearanceNameAqua];
 
-  [self setAppearance:appearance];
+   [self setAppearance:appearance];
 #endif /* MAC_OS_X_VERSION_MAX_ALLOWED >= 101000 */
 }
 
@@ -11199,6 +11427,25 @@ This variable is ignored on macOS < 10.7 and GNUstep.  Default is nil.  */);
                doc: /* Non-nil means mouse wheel scrolling uses momentum.
 This variable is ignored on macOS < 10.7 and GNUstep.  Default is t.  */);
   ns_use_mwheel_momentum = YES;
+
+ DEFVAR_LISP ("ns-system-appearance", Vns_system_appearance,
+               doc: /* Current system appearance, i.e. `dark' or `light'.
+
+This variable is ignored on macOS < 10.14 and GNUstep.  Default is nil.  */);
+  Vns_system_appearance = Qnil;
+  DEFSYM(Qns_system_appearance, "ns-system-appearance");
+
+  DEFVAR_LISP ("ns-system-appearance-change-functions",
+               Vns_system_appearance_change_functions,
+     doc: /* List of functions to call when the system appearance changes.
+Each function is called with a single argument, which corresponds to the new
+system appearance (`dark' or `light').
+
+This hook is also run once at startup.
+
+This variable is ignored on macOS < 10.14 and GNUstep.  Default is nil.  */);
+  Vns_system_appearance_change_functions = Qnil;
+  DEFSYM(Qns_system_appearance_change_functions, "ns-system-appearance-change-functions");
 
   /* TODO: Move to common code.  */
   DEFVAR_LISP ("x-toolkit-scroll-bars", Vx_toolkit_scroll_bars,

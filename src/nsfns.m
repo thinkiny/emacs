@@ -299,7 +299,7 @@ ns_set_background_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
   struct face *face;
   NSColor *col;
   NSView *view = FRAME_NS_VIEW (f);
-  EmacsCGFloat alpha;
+  EmacsCGFloat alpha = f->alpha_background;
 
   block_input ();
   if (ns_lisp_to_color (arg, &col))
@@ -314,23 +314,26 @@ ns_set_background_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
   f->output_data.ns->background_color = col;
 
   FRAME_BACKGROUND_PIXEL (f) = [col unsignedLong];
-  alpha = [col alphaComponent];
 
   if (view != nil)
     {
-      [[view window] setBackgroundColor: col];
+      [[view window] setBackgroundColor: [col colorWithAlphaComponent: alpha]];
 
       if (alpha != (EmacsCGFloat) 1.0)
           [[view window] setOpaque: NO];
       else
           [[view window] setOpaque: YES];
 
+      NSVisualEffectView *effectView = view.window.contentView.subviews.firstObject;
+      if (effectView.subviews.count == 2) {
+        NSBox *titleView = effectView.subviews.lastObject;
+        titleView.fillColor = [col colorWithAlphaComponent: alpha];
+      }
+
       face = FRAME_DEFAULT_FACE (f);
       if (face)
         {
-          col = [NSColor colorWithUnsignedLong:NS_FACE_BACKGROUND (face)];
-          face->background = [[col colorWithAlphaComponent: alpha]
-                               unsignedLong];
+          face->background = [col unsignedLong];
 
           update_face_from_frame_parameter (f, Qbackground_color, arg);
         }
@@ -344,6 +347,45 @@ ns_set_background_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
   unblock_input ();
 }
 
+
+static void
+ns_set_alpha_background (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
+{
+  NSView *view = FRAME_NS_VIEW (f);
+  double alpha = 1.0;
+
+  if (NILP (arg))
+    alpha = 1.0;
+  else if (FLOATP (arg))
+    {
+      alpha = XFLOAT_DATA (arg);
+      if (! (0 <= alpha && alpha <= 1.0))
+	args_out_of_range (make_float (0.0), make_float (1.0));
+    }
+  else if (FIXNUMP (arg))
+    {
+      EMACS_INT ialpha = XFIXNUM (arg);
+      if (! (0 <= ialpha && ialpha <= 100))
+	args_out_of_range (make_fixnum (0), make_fixnum (100));
+      alpha = ialpha / 100.0;
+    }
+  else
+    wrong_type_argument (Qnumberp, arg);
+
+  f->alpha_background = alpha;
+  [[view window] setBackgroundColor: [f->output_data.ns->background_color
+					 colorWithAlphaComponent: alpha]];
+
+  NSVisualEffectView *effectView = view.window.contentView.subviews.firstObject;
+  if (effectView.subviews.count == 2) {
+    NSBox *titleView = effectView.subviews.lastObject;
+    titleView.fillColor = [f->output_data.ns->background_color
+                              colorWithAlphaComponent: alpha];
+  }
+  
+  recompute_basic_faces (f);
+  SET_FRAME_GARBAGED (f);
+}
 
 static void
 ns_set_cursor_color (struct frame *f, Lisp_Object arg, Lisp_Object oldval)
@@ -1102,6 +1144,7 @@ frame_parm_handler ns_frame_parm_handlers[] =
   ns_set_tool_bar_position,
   ns_set_inhibit_double_buffering,
   ns_set_undecorated,
+  ns_set_undecorated_round,
   ns_set_parent_frame,
   0, /* x_set_skip_taskbar */
   ns_set_no_focus_on_map,
@@ -1109,7 +1152,7 @@ frame_parm_handler ns_frame_parm_handlers[] =
   ns_set_z_group,
   0, /* x_set_override_redirect */
   gui_set_no_special_glyphs,
-  gui_set_alpha_background,
+  ns_set_alpha_background,
   NULL,
 #ifdef NS_IMPL_COCOA
   ns_set_appearance,
@@ -1405,15 +1448,31 @@ DEFUN ("x-create-frame", Fx_create_frame, Sx_create_frame,
   FRAME_UNDECORATED (f) = !NILP (tem) && !EQ (tem, Qunbound);
   store_frame_param (f, Qundecorated, FRAME_UNDECORATED (f) ? Qt : Qnil);
 
+  tem = gui_display_get_arg (dpyinfo, parms, Qundecorated_round, NULL, NULL,
+                             RES_TYPE_BOOLEAN);
+  FRAME_UNDECORATED_ROUND (f) = !NILP (tem) && !EQ (tem, Qunbound);
+  store_frame_param (f, Qundecorated_round, FRAME_UNDECORATED_ROUND (f) ? Qt : Qnil);
+
 #ifdef NS_IMPL_COCOA
+#ifndef NSAppKitVersionNumber10_14
+#define NSAppKitVersionNumber10_14 1671
+#endif
   tem = gui_display_get_arg (dpyinfo, parms, Qns_appearance, NULL, NULL,
                              RES_TYPE_SYMBOL);
   if (EQ (tem, Qdark))
-    FRAME_NS_APPEARANCE (f) = ns_appearance_vibrant_dark;
+    if (NSAppKitVersionNumber >= NSAppKitVersionNumber10_14)
+      {
+        FRAME_NS_APPEARANCE (f) = ns_appearance_dark_aqua;
+      }
+    else
+      {
+        FRAME_NS_APPEARANCE (f) = ns_appearance_vibrant_dark;
+      }
   else if (EQ (tem, Qlight))
     FRAME_NS_APPEARANCE (f) = ns_appearance_aqua;
   else
     FRAME_NS_APPEARANCE (f) = ns_appearance_system_default;
+
   store_frame_param (f, Qns_appearance,
                      (!NILP (tem) && !EQ (tem, Qunbound)) ? tem : Qnil);
 

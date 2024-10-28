@@ -71,7 +71,8 @@ enum ns_appearance_type
   {
     ns_appearance_system_default,
     ns_appearance_aqua,
-    ns_appearance_vibrant_dark
+    ns_appearance_vibrant_dark,
+    ns_appearance_dark_aqua
   };
 #endif
 #endif /* HAVE_WINDOW_SYSTEM */
@@ -467,6 +468,9 @@ struct frame
 
   /* True if this is an undecorated frame.  */
   bool_bf undecorated : 1;
+
+  /* True if this is an undecorated frame with round corners.  */
+  bool_bf undecorated_round : 1;
 
 #ifndef HAVE_NTGUI
   /* True if this is an override_redirect frame.  */
@@ -1245,6 +1249,7 @@ default_pixels_per_inch_y (void)
 
 #if defined (HAVE_WINDOW_SYSTEM)
 #define FRAME_UNDECORATED(f) ((f)->undecorated)
+#define FRAME_UNDECORATED_ROUND(f) ((f)->undecorated_round)
 #ifdef HAVE_NTGUI
 #define FRAME_OVERRIDE_REDIRECT(f) ((void) (f), 0)
 #else
@@ -1271,6 +1276,7 @@ default_pixels_per_inch_y (void)
 #endif
 #else /* not HAVE_WINDOW_SYSTEM */
 #define FRAME_UNDECORATED(f) ((void) (f), 0)
+#define FRAME_UNDECORATED_ROUND(f) ((void) (f), 0)
 #define FRAME_OVERRIDE_REDIRECT(f) ((void) (f), 0)
 #define FRAME_PARENT_FRAME(f) ((void) (f), NULL)
 #define FRAME_SKIP_TASKBAR(f) ((void) (f), 0)
